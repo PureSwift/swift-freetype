@@ -34,6 +34,22 @@ try face.selectBitmapStrike(at: 0)   // see face.bitmapStrikes
 let emoji = try face.glyph(for: "😀", flags: .color)   // bitmap.pixelMode == .bgra
 ```
 
+## Errors
+
+FreeType failures are thrown as `FreeTypeError` and can be matched by code, like `POSIXError`:
+
+```swift
+do {
+    let face = try library.face(path: path)
+} catch FreeTypeError.cannotOpenResource {
+    // file missing or unreadable
+} catch FreeTypeError.unknownFileFormat, FreeTypeError.invalidFileFormat {
+    // not a usable font
+}
+```
+
+General-purpose codes are named; any other code is available as `FreeTypeError.Code(rawValue:)`. `message` uses `FT_Error_String`, which is empty unless FreeType was built with error strings (Homebrew's build isn't), in which case it falls back to "FreeType error N".
+
 ## Notes
 
 - `FreeTypeFace` is a noncopyable (`~Copyable`) struct: it has a single owner, `FT_Done_Face` runs once, and methods that change size or variation state are `mutating`. To share a face across threads, protect it with a lock.
