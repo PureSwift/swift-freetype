@@ -3,10 +3,15 @@ import Foundation
 
 /// An owned `FT_Face`.
 ///
+/// A face has exactly one owner, so it is noncopyable: `FT_Done_Face` runs once when the
+/// value goes out of scope, and methods that change the size or variation state
+/// (which later glyph loads depend on) are `mutating`, making exclusive access a
+/// compile-time guarantee. To share a face between threads, wrap it in a lock.
+///
 /// The face retains its ``FreeTypeLibrary`` and serializes every FreeType call through the
 /// library's lock. Glyph data is copied out of the shared glyph slot before the lock is
 /// released, so the returned values stay valid across later loads.
-public final class FreeTypeFace: @unchecked Sendable {
+public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     // Face flag bits (`FT_FACE_FLAG_*`). These are macros with shifts, which Swift doesn't import.
     private enum Flag {
         static let scalable: Int = 1 << 0
@@ -20,58 +25,43 @@ public final class FreeTypeFace: @unchecked Sendable {
 
     public let library: FreeTypeLibrary
     private let face: FT_Face
-    /// `FT_New_Memory_Face` faces read directly from this buffer until `FT_Done_Face`, so the
-    /// face owns a private copy rather than relying on a `Data` buffer's storage staying put.
-    private let fontBytes: UnsafeMutableRawBufferPointer?
+    /// Backing store for memory faces, destroyed after `deinit` (i.e. after `FT_Done_Face`).
+    private let fontBytes: OwnedBuffer?
 
-    public convenience init(library: FreeTypeLibrary, path: String, index: Int = 0) throws {
+    public init(library: FreeTypeLibrary, path: String, index: Int = 0) throws {
         var face: FT_Face?
         try library.withLock {
             try ftTry(FT_New_Face(library.handle, path, FT_Long(index), &face))
         }
-        try self.init(library: library, face: face, fontBytes: nil)
-    }
-
-    public convenience init(library: FreeTypeLibrary, data: Data, index: Int = 0) throws {
-        let bytes = UnsafeMutableRawBufferPointer.allocate(
-            byteCount: max(data.count, 1),
-            alignment: MemoryLayout<UInt64>.alignment
-        )
-        data.copyBytes(to: bytes.bindMemory(to: UInt8.self), count: data.count)
-
-        var face: FT_Face?
-        let error = library.withLock {
-            FT_New_Memory_Face(
-                library.handle,
-                bytes.baseAddress?.assumingMemoryBound(to: FT_Byte.self),
-                FT_Long(data.count),
-                FT_Long(index),
-                &face
-            )
-        }
-        guard error == 0 else {
-            bytes.deallocate()
-            throw FreeTypeError(code: error)
-        }
-        try self.init(library: library, face: face, fontBytes: bytes)
-    }
-
-    private init(library: FreeTypeLibrary, face: FT_Face?, fontBytes: UnsafeMutableRawBufferPointer?) throws {
-        guard let face else {
-            fontBytes?.deallocate()
-            throw FreeTypeError(code: 1)
-        }
+        guard let face else { throw FreeTypeError(code: 1) }
         self.library = library
         self.face = face
-        self.fontBytes = fontBytes
+        self.fontBytes = nil
+    }
+
+    public init(library: FreeTypeLibrary, data: Data, index: Int = 0) throws {
+        let bytes = OwnedBuffer(copying: data)
+        var face: FT_Face?
+        try library.withLock {
+            try ftTry(FT_New_Memory_Face(
+                library.handle,
+                bytes.baseAddress,
+                FT_Long(bytes.count),
+                FT_Long(index),
+                &face
+            ))
+        }
+        // On any failure, `bytes` is released here automatically.
+        guard let face else { throw FreeTypeError(code: 1) }
+        self.library = library
+        self.face = face
+        self.fontBytes = consume bytes
     }
 
     deinit {
         library.withLock {
             _ = FT_Done_Face(face)
         }
-        // Only after FT_Done_Face: FreeType may read this buffer until then.
-        fontBytes?.deallocate()
     }
 
     // MARK: - Metadata
@@ -111,7 +101,7 @@ public final class FreeTypeFace: @unchecked Sendable {
     // MARK: - Sizing and scaled metrics
 
     /// Sets the size from a point size and resolution. FreeType takes the size in 26.6 points.
-    public func setCharSize(
+    public mutating func setCharSize(
         pointSize: Double,
         horizontalDPI: UInt32 = 72,
         verticalDPI: UInt32 = 72
@@ -123,7 +113,7 @@ public final class FreeTypeFace: @unchecked Sendable {
     }
 
     /// Sets an exact pixel size.
-    public func setPixelSize(width: UInt32, height: UInt32) throws {
+    public mutating func setPixelSize(width: UInt32, height: UInt32) throws {
         try library.withLock {
             try ftTry(FT_Set_Pixel_Sizes(face, width, height))
         }
@@ -245,7 +235,7 @@ public final class FreeTypeFace: @unchecked Sendable {
 
     /// Sets variable font axes by tag (e.g. `["wght": 700]`). Axes not mentioned keep their
     /// current value, and values are clamped by FreeType to each axis range.
-    public func setVariation(_ values: [String: Double]) throws {
+    public mutating func setVariation(_ values: [String: Double]) throws {
         let axes = variationAxes
         guard !axes.isEmpty else {
             throw FreeTypeError(code: 6) // Invalid_Argument
