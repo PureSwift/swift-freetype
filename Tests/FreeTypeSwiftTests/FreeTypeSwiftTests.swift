@@ -31,7 +31,72 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         #expect(throws: FreeTypeError.self) {
             _ = try library.face(data: Data("not a font".utf8))
         }
-        #expect(!FreeTypeError(code: 1).message.isEmpty)
+        #expect(!FreeTypeError(.cannotOpenResource).message.isEmpty)
+    }
+}
+
+@Suite struct ErrorMatchingTests {
+    @Test func catchPatternMatchesCode() throws {
+        let library = try FreeTypeLibrary()
+        var matched = false
+        do {
+            _ = try library.face(path: "/nonexistent/font.ttf")
+        } catch FreeTypeError.cannotOpenResource {
+            matched = true
+        }
+        #expect(matched)
+    }
+
+    @Test func catchPatternSkipsOtherCodes() throws {
+        let library = try FreeTypeLibrary()
+        var outcome = ""
+        do {
+            // Long enough that FreeType tries each driver and rejects the data.
+            _ = try library.face(data: Data(repeating: 0x41, count: 4096))
+        } catch FreeTypeError.cannotOpenResource {
+            outcome = "wrong"
+        } catch FreeTypeError.unknownFileFormat, FreeTypeError.invalidFileFormat {
+            // Which of the two depends on the FreeType build and drivers.
+            outcome = "fileFormat"
+        } catch {
+            outcome = "other"
+        }
+        #expect(outcome == "fileFormat")
+    }
+
+    @Test func switchPatternOnConcreteError() {
+        let error = FreeTypeError(.invalidGlyphIndex)
+        switch error {
+        case FreeTypeError.outOfMemory: Issue.record("matched the wrong code")
+        case FreeTypeError.invalidGlyphIndex: break
+        default: Issue.record("did not match")
+        }
+    }
+
+    @Test func nonFreeTypeErrorsDoNotMatch() {
+        struct Other: Error {}
+        let error: any Error = Other()
+        #expect(!(FreeTypeError.unknownFileFormat ~= error))
+    }
+
+    @Test func rawCodesRoundTrip() {
+        #expect(FreeTypeError(code: 0x02) == FreeTypeError(.unknownFileFormat))
+        #expect(FreeTypeError(.outOfMemory).code.rawValue == 0x40)
+        // Codes without a named member stay matchable by raw value.
+        let bytecode = FreeTypeError.Code(rawValue: 0x80)
+        #expect(FreeTypeError(code: 0x80).code == bytecode)
+    }
+
+    @Test func badFaceIndexIsInvalidArgument() throws {
+        let library = try FreeTypeLibrary()
+        let path = try fontURL().path
+        var matched = false
+        do {
+            _ = try library.face(path: path, index: 99)
+        } catch FreeTypeError.invalidArgument {
+            matched = true
+        }
+        #expect(matched)
     }
 }
 
