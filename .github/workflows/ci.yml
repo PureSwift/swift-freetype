@@ -7,20 +7,41 @@ on:
 
 jobs:
   macos:
+    name: macOS (Swift ${{ matrix.swift }})
     runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.3.2", "6.4.2"]
     steps:
       - uses: actions/checkout@v4
       - name: Install FreeType
         run: brew install freetype pkg-config
+      - name: Install Swift ${{ matrix.swift }}
+        run: |
+          curl -fsSL -o swiftly.pkg https://download.swift.org/swiftly/darwin/swiftly.pkg
+          installer -pkg swiftly.pkg -target CurrentUserHomeDirectory
+          ~/.swiftly/bin/swiftly init --quiet-shell-followup --assume-yes
+          ~/.swiftly/bin/swiftly install --use --assume-yes ${{ matrix.swift }}
+          echo "$HOME/.swiftly/bin" >> "$GITHUB_PATH"
+      - name: Swift version
+        run: swift --version
       - name: Test (Address Sanitizer)
         run: swift test --sanitize=address --disable-xctest
 
   linux:
+    name: Linux (Swift ${{ matrix.swift }})
     runs-on: ubuntu-latest
-    container: swift:6.4
+    container: swift:${{ matrix.swift }}
+    strategy:
+      fail-fast: false
+      matrix:
+        swift: ["6.3.2", "6.4.2"]
     steps:
       - uses: actions/checkout@v4
       - name: Install FreeType
         run: apt-get update && apt-get install -y libfreetype6-dev pkg-config
+      - name: Swift version
+        run: swift --version
       - name: Test (Address Sanitizer)
         run: swift test --sanitize=address --disable-xctest
