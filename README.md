@@ -49,6 +49,11 @@ face.mappedCharacters()               // every (code, glyph) pair the selected m
 face.glyphName(for: face.glyphIndex(for: "A"))   // "A"
 face.glyphIndex(named: "space")
 
+// SFNT name table
+face.sfntName(.license)               // best match, English Windows names first
+face.sfntNames                        // every record, with platform and language IDs
+face.postScriptName
+
 // Outline bounds (tight box, and the cheaper control-point box)
 try face.glyph(for: "O", flags: .noHinting).outline?.boundingBox
 
