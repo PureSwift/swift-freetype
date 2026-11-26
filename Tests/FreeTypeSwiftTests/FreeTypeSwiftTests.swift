@@ -261,3 +261,38 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         #expect(black > thin)
     }
 }
+
+@Suite struct BitmapStrikeTests {
+    // System color font; present on macOS only, and too large to bundle.
+    private static let emojiPath = "/System/Library/Fonts/Apple Color Emoji.ttc"
+
+    @Test func scalableFontHasNoStrikes() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let strikes = face.bitmapStrikes
+        #expect(strikes.isEmpty)
+    }
+
+    @Test(.enabled(if: FileManager.default.fileExists(atPath: emojiPath)))
+    func colorEmojiLoadsAsBGRA() throws {
+        var face = try FreeTypeLibrary().face(path: Self.emojiPath)
+        let hasColor = face.hasColor
+        let strikes = face.bitmapStrikes
+        #expect(hasColor)
+        #expect(!strikes.isEmpty)
+
+        try face.selectBitmapStrike(at: 0)
+        let glyph = try face.glyph(for: "😀", flags: [.color])
+        let bitmap = try #require(glyph.bitmap)
+        #expect(bitmap.pixelMode == .bgra)
+        #expect(bitmap.bytesPerRow == bitmap.width * 4)
+        #expect(bitmap.hasCoverage)
+        #expect(glyph.outline == nil)
+    }
+
+    @Test func invalidStrikeIndexThrows() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        #expect(throws: FreeTypeError.self) {
+            try face.selectBitmapStrike(at: 0)
+        }
+    }
+}
