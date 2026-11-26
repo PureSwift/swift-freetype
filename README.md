@@ -45,6 +45,20 @@ face.charMaps                         // [CharMap], with encodings and platform 
 try face.selectCharMap(.unicode)
 face.mappedCharacters()               // every (code, glyph) pair the selected map covers
 
+// Glyph names
+face.glyphName(for: face.glyphIndex(for: "A"))   // "A"
+face.glyphIndex(named: "space")
+
+// SFNT name table
+face.sfntName(.license)               // best match, English Windows names first
+face.sfntNames                        // every record, with platform and language IDs
+face.postScriptName
+
+// Font collections (.ttc)
+try library.faceDescriptions(path: path)              // every face: index, family, style, PostScript name
+let second = try library.face(path: path, index: 1)    // second.faceCount, second.faceIndex
+let bold = try library.face(path: path, namedInstance: 7)   // open straight into a named instance
+
 // Outline bounds (tight box, and the cheaper control-point box)
 try face.glyph(for: "O", flags: .noHinting).outline?.boundingBox
 

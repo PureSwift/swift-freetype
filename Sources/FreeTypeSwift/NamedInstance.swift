@@ -71,42 +71,4 @@ extension FreeTypeFace {
             )
         }
     }
-
-    /// Looks up an SFNT name table string, preferring English Windows names. The caller must
-    /// hold the library lock.
-    func unlockedSfntName(id: UInt16) -> String? {
-        var best: (rank: Int, string: String)?
-        for index in 0..<FT_Get_Sfnt_Name_Count(face) {
-            var name = FT_SfntName()
-            guard FT_Get_Sfnt_Name(face, index, &name) == 0,
-                  name.name_id == id,
-                  let pointer = name.string
-            else { continue }
-            let bytes = Array(UnsafeBufferPointer(start: pointer, count: Int(name.string_len)))
-
-            let candidate: (rank: Int, string: String)?
-            switch (name.platform_id, name.encoding_id) {
-            case (3, _): // Microsoft, UTF-16BE
-                candidate = (name.language_id == 0x409 ? 0 : 1, Self.decodeUTF16BE(bytes))
-            case (0, _): // Apple Unicode, UTF-16BE
-                candidate = (2, Self.decodeUTF16BE(bytes))
-            case (1, 0): // Macintosh Roman
-                candidate = String(bytes: bytes, encoding: .macOSRoman)
-                    .map { (name.language_id == 0 ? 3 : 4, $0) }
-            default:
-                candidate = nil
-            }
-            if let candidate, candidate.rank < (best?.rank ?? .max) {
-                best = candidate
-            }
-        }
-        return best?.string
-    }
-
-    private static func decodeUTF16BE(_ bytes: [UInt8]) -> String {
-        let units = stride(from: 0, to: bytes.count - 1, by: 2).map {
-            UInt16(bytes[$0]) << 8 | UInt16(bytes[$0 + 1])
-        }
-        return String(decoding: units, as: UTF16.self)
-    }
 }

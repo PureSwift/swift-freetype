@@ -41,12 +41,12 @@ public final class FreeTypeLibrary: @unchecked Sendable {
     }
 
     /// Opens a face from a font file.
-    public func face(path: String, index: Int = 0) throws -> FreeTypeFace {
-        try FreeTypeFace(library: self, path: path, index: index)
+    public func face(path: String, index: Int = 0, namedInstance: Int = 0) throws -> FreeTypeFace {
+        try FreeTypeFace(library: self, path: path, index: index, namedInstance: namedInstance)
     }
 
     /// Opens a face from in-memory font data. The bytes are copied and owned by the face.
-    public func face(data: Data, index: Int = 0) throws -> FreeTypeFace {
-        try FreeTypeFace(library: self, data: data, index: index)
+    public func face(data: Data, index: Int = 0, namedInstance: Int = 0) throws -> FreeTypeFace {
+        try FreeTypeFace(library: self, data: data, index: index, namedInstance: namedInstance)
     }
 }

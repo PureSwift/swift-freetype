@@ -558,3 +558,296 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         }
     }
 }
+
+@Suite struct GlyphNameTests {
+    @Test func namesKnownGlyphs() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let hasNames = face.hasGlyphNames
+        let a = face.glyphName(for: face.glyphIndex(for: "A"))
+        let space = face.glyphName(for: face.glyphIndex(for: " "))
+        #expect(hasNames)
+        #expect(a == "A")
+        #expect(space == "space")
+    }
+
+    @Test func lookupByNameMatchesCharMap() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let byName = face.glyphIndex(named: "A")
+        let byScalar = face.glyphIndex(for: "A")
+        #expect(byName != 0)
+        #expect(byName == byScalar)
+    }
+
+    @Test func unknownNameAndIndexAreMissing() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let missingIndex = face.glyphIndex(named: "definitely-not-a-glyph")
+        let emptyIndex = face.glyphIndex(named: "")
+        let outOfRange = face.glyphName(for: 0xFFFF_FFF0)
+        #expect(missingIndex == 0)
+        #expect(emptyIndex == 0)
+        #expect(outOfRange == nil)
+    }
+
+    @Test func namesRoundTrip() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let count = min(face.glyphCount, 300)
+        var named = 0
+        for index in 0..<count {
+            guard let name = face.glyphName(for: UInt32(index)) else { continue }
+            named += 1
+            // Looking a name up returns a glyph that carries that same name.
+            let found = face.glyphIndex(named: name)
+            #expect(found != 0 || index == 0)
+            #expect(face.glyphName(for: found) == name)
+        }
+        #expect(named > count / 2)
+    }
+}
+
+@Suite struct SfntNameTests {
+    @Test func readsCommonNames() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let family = face.sfntName(.family)
+        let subfamily = face.sfntName(.subfamily)
+        let full = face.sfntName(.fullName)
+        let postScript = face.sfntName(.postScriptName)
+        let license = face.sfntName(.license)
+        let licenseURL = face.sfntName(.licenseURL)
+        let copyright = face.sfntName(.copyright)
+        #expect(family == "Inter")
+        #expect(subfamily == "Regular")
+        #expect(full == "Inter Regular")
+        #expect(postScript == "Inter-Regular")
+        #expect(license?.contains("SIL Open Font License") == true)
+        #expect(licenseURL == "https://openfontlicense.org")
+        #expect(copyright?.contains("The Inter Project Authors") == true)
+    }
+
+    @Test func missingNameIsNil() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let unused = face.sfntName(SfntName.ID(rawValue: 0x7FFF))
+        #expect(unused == nil)
+    }
+
+    @Test func recordsExposePlatformAndLanguage() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let records = face.sfntNames
+        let family = try #require(records.first { $0.id == .family && $0.platformID == 3 && $0.languageID == 0x409 })
+        #expect(records.count > 10)
+        #expect(family.string == "Inter")
+        #expect(family.isEnglish)
+        #expect(records.allSatisfy { !$0.string.isEmpty })
+    }
+
+    @Test func preferredNameMatchesAnEnglishWindowsRecord() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let records = face.sfntNames
+        let preferred = face.sfntName(.fullName)
+        let windowsEnglish = records.first { $0.id == .fullName && $0.platformID == 3 && $0.languageID == 0x409 }
+        #expect(preferred == windowsEnglish?.string)
+    }
+
+    @Test func postScriptNameUsesFreeTypeAccessor() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let optionalName = face.postScriptName
+        let name = try #require(optionalName)
+        #expect(name.hasPrefix("Inter"))
+    }
+
+    @Test func namedInstanceNamesStillResolve() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let instances = face.namedInstances
+        #expect(instances.contains { $0.name == "Bold" })
+        #expect(instances.allSatisfy { !$0.name.hasPrefix("Instance ") })
+    }
+
+    @Test func emojiFontNamesAreAvailable() throws {
+        let path = "/System/Library/Fonts/Apple Color Emoji.ttc"
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let face = try FreeTypeLibrary().face(path: path)
+        let family = face.sfntName(.family)
+        #expect(family?.contains("Emoji") == true)
+    }
+}
+
+/// Builds a TrueType collection (`ttcf`) of `faces` faces that all share one set of font tables.
+///
+/// A collection is a small header followed by table directories, and table records hold absolute
+/// file offsets. So the font is shifted by the header size, with each record's offset adjusted,
+/// and extra directories are appended that point at the same shared tables.
+private func makeCollection(from font: Data, faces: Int) -> Data {
+    func be32(_ value: Int) -> [UInt8] {
+        [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: value >> $0) }
+    }
+
+    let bytes = [UInt8](font)
+    let tableCount = Int(bytes[4]) << 8 | Int(bytes[5])
+    let directorySize = 12 + 16 * tableCount
+    let headerSize = 12 + 4 * faces
+
+    var shifted = bytes
+    for table in 0..<tableCount {
+        let at = 12 + 16 * table + 8
+        let offset = bytes[at..<at + 4].reduce(0) { $0 << 8 | Int($1) } + headerSize
+        shifted.replaceSubrange(at..<at + 4, with: be32(offset))
+    }
+
+    var collection = Array("ttcf".utf8) + be32(0x0001_0000) + be32(faces)
+    for face in 0..<faces {
+        collection += be32(face == 0 ? headerSize : headerSize + shifted.count + (face - 1) * directorySize)
+    }
+    collection += shifted
+    for _ in 1..<max(faces, 1) {
+        collection += shifted[0..<directorySize]
+    }
+    return Data(collection)
+}
+
+@Suite struct CollectionTests {
+    private func collection(faces: Int = 3) throws -> Data {
+        makeCollection(from: try Data(contentsOf: fontURL()), faces: faces)
+    }
+
+    @Test func singleFaceFontHasOneFace() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let count = face.faceCount
+        let index = face.faceIndex
+        #expect(count == 1)
+        #expect(index == 0)
+    }
+
+    @Test func collectionReportsFaceCount() throws {
+        let face = try FreeTypeLibrary().face(data: collection())
+        let count = face.faceCount
+        let index = face.faceIndex
+        #expect(count == 3)
+        #expect(index == 0)
+    }
+
+    @Test func opensEachFaceOfCollection() throws {
+        let library = try FreeTypeLibrary()
+        let data = try collection()
+        for index in 0..<3 {
+            var face = try library.face(data: data, index: index)
+            let reported = face.faceIndex
+            let family = face.familyName
+            #expect(reported == index)
+            #expect(family == "Inter")
+            // The shared tables are really readable through every face.
+            try face.setPixelSize(width: 0, height: 32)
+            let glyph = try face.glyph(for: "A", flags: .render)
+            #expect(glyph.bitmap?.hasCoverage == true)
+        }
+    }
+
+    @Test func outOfRangeFaceIndexThrows() throws {
+        let library = try FreeTypeLibrary()
+        let data = try collection()
+        #expect(throws: FreeTypeError.self) {
+            _ = try library.face(data: data, index: 3)
+        }
+    }
+
+    @Test func describesEveryFaceFromData() throws {
+        let descriptions = try FreeTypeLibrary().faceDescriptions(data: collection())
+        #expect(descriptions.map(\.index) == [0, 1, 2])
+        #expect(descriptions.allSatisfy { $0.familyName == "Inter" && $0.postScriptName != nil })
+    }
+
+    @Test func describesEveryFaceFromPath() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).ttc")
+        try collection(faces: 2).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let descriptions = try FreeTypeLibrary().faceDescriptions(path: url.path)
+        #expect(descriptions.map(\.index) == [0, 1])
+    }
+
+    @Test func describesSingleFaceFont() throws {
+        let descriptions = try FreeTypeLibrary().faceDescriptions(path: fontURL().path)
+        #expect(descriptions.count == 1)
+        #expect(descriptions.first?.styleName == "Regular")
+    }
+
+    @Test func missingFileDescriptionThrows() throws {
+        let library = try FreeTypeLibrary()
+        var matched = false
+        do {
+            _ = try library.faceDescriptions(path: "/nonexistent/font.ttc")
+        } catch FreeTypeError.cannotOpenResource {
+            matched = true
+        }
+        #expect(matched)
+    }
+}
+
+@Suite struct OpenWithNamedInstanceTests {
+    private func boldInstance() throws -> NamedInstance {
+        let face = try makeFace(FreeTypeLibrary())
+        let instances = face.namedInstances
+        return try #require(instances.first { $0.name == "Bold" })
+    }
+
+    @Test func opensDirectlyAsNamedInstance() throws {
+        let bold = try boldInstance()
+        let face = try FreeTypeLibrary().face(path: fontURL().path, namedInstance: bold.index)
+        let style = face.styleName
+        let wght = face.variationCoordinates["wght"]
+        let instance = face.namedInstanceIndex
+        let index = face.faceIndex
+        #expect(style == "Bold")
+        #expect(wght == 700)
+        #expect(instance == bold.index)
+        #expect(index == 0)
+    }
+
+    @Test func combinesCollectionFaceAndInstance() throws {
+        let bold = try boldInstance()
+        let data = try makeCollection(from: Data(contentsOf: fontURL()), faces: 3)
+        let face = try FreeTypeLibrary().face(data: data, index: 2, namedInstance: bold.index)
+        let index = face.faceIndex
+        let instance = face.namedInstanceIndex
+        let wght = face.variationCoordinates["wght"]
+        #expect(index == 2)
+        #expect(instance == bold.index)
+        #expect(wght == 700)
+    }
+
+    @Test func defaultFaceHasNoNamedInstance() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let instance = face.namedInstanceIndex
+        #expect(instance == 0)
+    }
+
+    @Test func selectingInstanceUpdatesIndexButSettingAxesDoesNot() throws {
+        let bold = try boldInstance()
+        var face = try makeFace(FreeTypeLibrary())
+        try face.selectNamedInstance(bold)
+        let afterSelect = face.namedInstanceIndex
+        try face.setVariation(["wght": 300])
+        let afterAxes = face.namedInstanceIndex
+        #expect(afterSelect == bold.index)
+        #expect(afterAxes == bold.index)
+    }
+
+    @Test func outOfRangeArgumentsThrowInvalidArgument() throws {
+        let library = try FreeTypeLibrary()
+        let path = try fontURL().path
+        for (index, instance) in [(-1, 0), (0x1_0000, 0), (0, -1), (0, 0x8000)] {
+            var matched = false
+            do {
+                _ = try library.face(path: path, index: index, namedInstance: instance)
+            } catch FreeTypeError.invalidArgument {
+                matched = true
+            }
+            #expect(matched, "index \(index), instance \(instance)")
+        }
+    }
+
+    @Test func nonexistentInstanceThrows() throws {
+        let library = try FreeTypeLibrary()
+        let path = try fontURL().path
+        #expect(throws: FreeTypeError.self) {
+            _ = try library.face(path: path, namedInstance: 500)
+        }
+    }
+}
