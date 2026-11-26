@@ -12,15 +12,35 @@ import Foundation
 /// library's lock. Glyph data is copied out of the shared glyph slot before the lock is
 /// released, so the returned values stay valid across later loads.
 public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
-    // Face flag bits (`FT_FACE_FLAG_*`). These are macros with shifts, which Swift doesn't import.
-    private enum Flag {
-        static let scalable: Int = 1 << 0
-        static let fixedWidth: Int = 1 << 2
-        static let kerning: Int = 1 << 6
-        static let multipleMasters: Int = 1 << 8
-        static let glyphNames: Int = 1 << 9
-        static let color: Int = 1 << 14
-        static let variation: Int = 1 << 15
+    /// Face capabilities, mirroring `FT_FACE_FLAG_*`. The C flags are macros with shifts,
+    /// which Swift doesn't import, so the bit positions are spelled out here.
+    public struct Flags: OptionSet, Sendable {
+        public let rawValue: Int
+
+        public init(rawValue: Int) {
+            self.rawValue = rawValue
+        }
+
+        public static let scalable = Flags(rawValue: 1 << 0)
+        public static let fixedSizes = Flags(rawValue: 1 << 1)
+        public static let fixedWidth = Flags(rawValue: 1 << 2)
+        public static let sfnt = Flags(rawValue: 1 << 3)
+        public static let horizontal = Flags(rawValue: 1 << 4)
+        public static let vertical = Flags(rawValue: 1 << 5)
+        public static let kerning = Flags(rawValue: 1 << 6)
+        /// Set for variable fonts (`FT_FACE_FLAG_MULTIPLE_MASTERS`).
+        public static let multipleMasters = Flags(rawValue: 1 << 8)
+        public static let glyphNames = Flags(rawValue: 1 << 9)
+        public static let externalStream = Flags(rawValue: 1 << 10)
+        public static let hinter = Flags(rawValue: 1 << 11)
+        public static let cidKeyed = Flags(rawValue: 1 << 12)
+        public static let tricky = Flags(rawValue: 1 << 13)
+        public static let color = Flags(rawValue: 1 << 14)
+        /// Set once the variation coordinates differ from the defaults (`FT_FACE_FLAG_VARIATION`).
+        public static let variation = Flags(rawValue: 1 << 15)
+        public static let svg = Flags(rawValue: 1 << 16)
+        public static let sbix = Flags(rawValue: 1 << 17)
+        public static let sbixOverlay = Flags(rawValue: 1 << 18)
     }
 
     public let library: FreeTypeLibrary
@@ -66,7 +86,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
 
     // MARK: - Metadata
 
-    private var flags: Int { Int(face.pointee.face_flags) }
+    public var flags: Flags { Flags(rawValue: Int(face.pointee.face_flags)) }
 
     public var familyName: String {
         face.pointee.family_name.map { String(cString: $0) } ?? ""
@@ -80,16 +100,15 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     public var glyphCount: Int { Int(face.pointee.num_glyphs) }
     public var unitsPerEM: UInt16 { face.pointee.units_per_EM }
 
-    public var isScalable: Bool { flags & Flag.scalable != 0 }
-    public var isFixedWidth: Bool { flags & Flag.fixedWidth != 0 }
-    public var hasKerning: Bool { flags & Flag.kerning != 0 }
-    public var hasColor: Bool { flags & Flag.color != 0 }
-    public var hasGlyphNames: Bool { flags & Flag.glyphNames != 0 }
+    public var isScalable: Bool { flags.contains(.scalable) }
+    public var isFixedWidth: Bool { flags.contains(.fixedWidth) }
+    public var hasKerning: Bool { flags.contains(.kerning) }
+    public var hasColor: Bool { flags.contains(.color) }
+    public var hasGlyphNames: Bool { flags.contains(.glyphNames) }
     /// Whether the font has variation axes (OpenType variable fonts and MM/GX fonts).
-    public var isVariable: Bool { flags & Flag.multipleMasters != 0 }
-    /// Whether the variation coordinates have been changed from the defaults
-    /// (`FT_FACE_FLAG_VARIATION`).
-    public var hasCustomVariation: Bool { flags & Flag.variation != 0 }
+    public var isVariable: Bool { flags.contains(.multipleMasters) }
+    /// Whether the variation coordinates have been changed from the defaults.
+    public var hasCustomVariation: Bool { flags.contains(.variation) }
 
     /// Ascender in font units, independent of the current size.
     public var designAscender: Int { Int(face.pointee.ascender) }
