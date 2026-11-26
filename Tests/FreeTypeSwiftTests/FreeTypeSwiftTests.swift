@@ -361,3 +361,200 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         }
     }
 }
+
+@Suite struct AdvanceTests {
+    @Test func advanceMatchesLinearAdvance() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 40)
+        let index = face.glyphIndex(for: "A")
+        let fast = try face.advance(of: index)
+        let loaded = try face.glyph(at: index, flags: .noHinting).linearHorizontalAdvance
+        #expect(fast > 0)
+        #expect(abs(fast - loaded) < 0.01)
+    }
+
+    @Test func batchMatchesIndividualAdvances() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 24)
+        let indices = "Hello".unicodeScalars.map { face.glyphIndex(for: $0) }
+        let batch = try face.advances(of: indices)
+        let individual = try indices.map { try face.advance(of: $0) }
+        #expect(batch == individual)
+        let none = try face.advances(of: [])
+        #expect(none.isEmpty)
+    }
+
+    @Test func noScaleAdvanceIsInFontUnits() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let index = face.glyphIndex(for: "A")
+        let units = try face.advance(of: index, flags: [.noScale])
+        let loaded = try face.glyph(at: index, flags: .noScale).advanceX
+        #expect(units == loaded)
+        #expect(units > 100)
+    }
+
+    @Test func invalidGlyphIndexThrows() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 24)
+        #expect(throws: FreeTypeError.self) {
+            _ = try face.advance(of: 0xFFFF_FFF0)
+        }
+    }
+}
+
+@Suite struct CharMapTests {
+    @Test func listsUnicodeCharMap() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let maps = face.charMaps
+        let selectedMap = face.selectedCharMap
+        let selected = try #require(selectedMap)
+        #expect(!maps.isEmpty)
+        #expect(maps.contains { $0.encoding == .unicode })
+        #expect(selected.encoding == .unicode)
+        #expect(maps[selected.index] == selected)
+    }
+
+    @Test func encodingTagsMatchFreeType() {
+        #expect(CharMap.Encoding.unicode.rawValue == 0x756E_6963) // 'unic'
+        #expect(CharMap.Encoding.none.rawValue == 0)
+        #expect(CharMap.Encoding.prc.rawValue == 0x6762_2020) // 'gb  '
+    }
+
+    @Test func selectingMissingEncodingThrows() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        #expect(throws: FreeTypeError.self) {
+            try face.selectCharMap(.adobeCustom)
+        }
+        var matched = false
+        do {
+            try face.selectCharMap(at: 999)
+        } catch FreeTypeError.invalidArgument {
+            matched = true
+        }
+        #expect(matched)
+    }
+
+    @Test func selectingByIndexAndEncoding() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        let maps = face.charMaps
+        let last = try #require(maps.last)
+        try face.selectCharMap(at: last.index)
+        let selectedByIndex = face.selectedCharMap
+        #expect(selectedByIndex == last)
+        try face.selectCharMap(.unicode)
+        let selectedByEncoding = face.selectedCharMap
+        #expect(selectedByEncoding?.encoding == .unicode)
+    }
+
+    @Test func enumeratesMappedCharacters() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let mapped = face.mappedCharacters()
+        let a = face.glyphIndex(for: "A")
+        #expect(mapped.count > 100)
+        #expect(mapped.map(\.code) == mapped.map(\.code).sorted())
+        #expect(mapped.allSatisfy { $0.glyphIndex != 0 })
+        #expect(mapped.contains { $0.scalar == "A" && $0.glyphIndex == a })
+        #expect(!mapped.contains { $0.code == 0x10FFFF })
+    }
+}
+
+@Suite struct OutlineBoundsTests {
+    @Test func boundingBoxMatchesMetrics() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 100)
+        let glyph = try face.glyph(for: "H", flags: .noHinting)
+        let box = try #require(glyph.outline).boundingBox
+        #expect(abs(box.maxY - glyph.metrics.horizontalBearingY) < 1)
+        #expect(abs(box.minX - glyph.metrics.horizontalBearingX) < 1)
+        #expect(abs(box.width - glyph.metrics.width) < 1)
+        #expect(abs(box.height - glyph.metrics.height) < 1)
+    }
+
+    @Test func controlBoxContainsBoundingBox() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 100)
+        let glyph = try face.glyph(for: "O", flags: .noHinting)
+        let outline = try #require(glyph.outline)
+        let tight = outline.boundingBox
+        let control = outline.controlBox
+        #expect(control.minX <= tight.minX && control.minY <= tight.minY)
+        #expect(control.maxX >= tight.maxX && control.maxY >= tight.maxY)
+    }
+
+    @Test func emptyOutlineHasEmptyBox() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 100)
+        let glyph = try face.glyph(for: " ", flags: .noHinting)
+        let outline = try #require(glyph.outline)
+        #expect(outline.boundingBox.width == 0 && outline.boundingBox.height == 0)
+    }
+}
+
+@Suite struct NamedInstanceTests {
+    @Test func listsNamedInstances() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let instances = face.namedInstances
+        let weights = face.variationAxes.first { $0.tag == "wght" }
+        #expect(instances.count > 1)
+        #expect(instances.map(\.index) == Array(1...instances.count))
+        #expect(instances.allSatisfy { $0.coordinates["wght"] != nil })
+        // Names come from the name table, not the "Instance N" fallback.
+        #expect(instances.allSatisfy { !$0.name.hasPrefix("Instance ") })
+        #expect(instances.contains { $0.name == "Bold" })
+        let axis = try #require(weights)
+        #expect(instances.allSatisfy {
+            ($0.coordinates["wght"] ?? 0) >= axis.minimum && ($0.coordinates["wght"] ?? 0) <= axis.maximum
+        })
+    }
+
+    @Test func selectingInstanceSetsCoordinates() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        let instances = face.namedInstances
+        let bold = try #require(instances.first { $0.name == "Bold" })
+        try face.selectNamedInstance(bold)
+        let coordinates = face.variationCoordinates
+        #expect(coordinates["wght"] == bold.coordinates["wght"])
+        #expect(coordinates["wght"] == 700)
+    }
+
+    @Test func resetVariationRestoresDefaults() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        let axes = face.variationAxes
+        let weight = try #require(axes.first { $0.tag == "wght" })
+        let instances = face.namedInstances
+        let black = try #require(instances.max { ($0.coordinates["wght"] ?? 0) < ($1.coordinates["wght"] ?? 0) })
+        try face.selectNamedInstance(black)
+        let heavy = face.variationCoordinates["wght"]
+        try face.resetVariation()
+        let restored = face.variationCoordinates["wght"]
+        #expect(heavy == weight.maximum)
+        #expect(restored == weight.defaultValue)
+    }
+
+    @Test func instanceChangesGlyphMetrics() throws {
+        var face = try makeFace(FreeTypeLibrary())
+        try face.setPixelSize(width: 0, height: 64)
+        let instances = face.namedInstances
+        let thin = try #require(instances.min { ($0.coordinates["wght"] ?? 0) < ($1.coordinates["wght"] ?? 0) })
+        let black = try #require(instances.max { ($0.coordinates["wght"] ?? 0) < ($1.coordinates["wght"] ?? 0) })
+        try face.selectNamedInstance(thin)
+        let thinAdvance = try face.advance(of: face.glyphIndex(for: "m"))
+        try face.selectNamedInstance(black)
+        let blackAdvance = try face.advance(of: face.glyphIndex(for: "m"))
+        #expect(blackAdvance > thinAdvance)
+    }
+
+    @Test func nonVariableCoordinatesAreEmptyAndSelectionThrows() throws {
+        // Bitmap-only emoji fonts aren't variable; skip quietly where unavailable.
+        let path = "/System/Library/Fonts/Apple Color Emoji.ttc"
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        var face = try FreeTypeLibrary().face(path: path)
+        let coordinates = face.variationCoordinates
+        let instances = face.namedInstances
+        #expect(coordinates.isEmpty)
+        #expect(instances.isEmpty)
+        #expect(throws: FreeTypeError.self) {
+            try face.selectNamedInstance(NamedInstance(index: 1, name: "x", coordinates: [:]))
+        }
+    }
+}
