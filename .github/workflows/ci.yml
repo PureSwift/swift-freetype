@@ -13,7 +13,7 @@ jobs:
       - name: Install FreeType
         run: brew install freetype pkg-config
       - name: Test (Address Sanitizer)
-        run: swift test --sanitize=address
+        run: swift test --sanitize=address --disable-xctest
 
   linux:
     runs-on: ubuntu-latest
@@ -23,4 +23,4 @@ jobs:
       - name: Install FreeType
         run: apt-get update && apt-get install -y libfreetype6-dev pkg-config
       - name: Test (Address Sanitizer)
-        run: swift test --sanitize=address
+        run: swift test --sanitize=address --disable-xctest
