@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FreeType
+        run: brew install freetype pkg-config
+      - name: Test (Address Sanitizer)
+        run: swift test --sanitize=address
+
+  linux:
+    runs-on: ubuntu-latest
+    container: swift:6.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install FreeType
+        run: apt-get update && apt-get install -y libfreetype6-dev pkg-config
+      - name: Test (Address Sanitizer)
+        run: swift test --sanitize=address
