@@ -27,6 +27,13 @@ try face.setVariation(["wght": 700])   // variable fonts
 
 Metrics and outline coordinates are in pixels, or font units when `.noScale` is used.
 
+Bitmap fonts (e.g. color emoji) need a strike selected instead of a size:
+
+```swift
+try face.selectBitmapStrike(at: 0)   // see face.bitmapStrikes
+let emoji = try face.glyph(for: "😀", flags: .color)   // bitmap.pixelMode == .bgra
+```
+
 ## Notes
 
 - `FreeTypeFace` is a noncopyable (`~Copyable`) struct: it has a single owner, `FT_Done_Face` runs once, and methods that change size or variation state are `mutating`. To share a face across threads, protect it with a lock.
