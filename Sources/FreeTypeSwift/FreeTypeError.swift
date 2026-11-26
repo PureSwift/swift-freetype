@@ -9,6 +9,12 @@ public struct FreeTypeError: Error, LocalizedError, Hashable, Sendable {
         self.code = code
     }
 
+    /// `FT_Err_Invalid_Argument`.
+    public static var invalidArgument: FreeTypeError { FreeTypeError(code: Int32(FT_Err_Invalid_Argument)) }
+
+    /// `FT_Err_Invalid_Handle`; used if FreeType reports success but returns a null handle.
+    public static var invalidHandle: FreeTypeError { FreeTypeError(code: Int32(FT_Err_Invalid_Handle)) }
+
     /// The FreeType message for this code.
     ///
     /// `FT_Error_String` returns `NULL` unless FreeType was built with
