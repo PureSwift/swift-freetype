@@ -138,6 +138,31 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         }
     }
 
+    /// Fixed-size bitmap strikes (e.g. color emoji fonts), empty for purely scalable fonts.
+    public var bitmapStrikes: [BitmapStrike] {
+        guard let sizes = face.pointee.available_sizes else { return [] }
+        return (0..<Int(face.pointee.num_fixed_sizes)).map { index in
+            let size = sizes[index]
+            return BitmapStrike(
+                width: Int(size.width),
+                height: Int(size.height),
+                pointSize: Double(size.size) / 64,
+                horizontalPPEM: Double(size.x_ppem) / 64,
+                verticalPPEM: Double(size.y_ppem) / 64
+            )
+        }
+    }
+
+    /// Selects a fixed-size bitmap strike by its index in ``bitmapStrikes``.
+    ///
+    /// Bitmap-only fonts can't be scaled with ``setPixelSize(width:height:)``; they need
+    /// a strike selected before glyphs load.
+    public mutating func selectBitmapStrike(at index: Int) throws {
+        try library.withLock {
+            try ftTry(FT_Select_Size(face, FT_Int(index)))
+        }
+    }
+
     /// Scaled metrics for the current size, in pixels. All zero until a size is set.
     public var ascender: Double { scaledMetric(\.ascender) }
     public var descender: Double { scaledMetric(\.descender) }
@@ -270,6 +295,16 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
             try ftTry(FT_Set_Var_Design_Coordinates(face, FT_UInt(axes.count), &coordinates))
         }
     }
+}
+
+/// A fixed-size bitmap strike of a face.
+public struct BitmapStrike: Hashable, Sendable {
+    /// Nominal pixel width and height of the strike.
+    public var width: Int
+    public var height: Int
+    public var pointSize: Double
+    public var horizontalPPEM: Double
+    public var verticalPPEM: Double
 }
 
 /// An axis of a variable font.
