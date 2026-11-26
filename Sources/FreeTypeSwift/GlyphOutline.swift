@@ -17,9 +17,26 @@ public enum OutlineElement: Hashable, Sendable {
     case close
 }
 
+/// An axis-aligned box, y-up, in the same units as the outline it came from.
+public struct BoundingBox: Hashable, Sendable {
+    public var minX: Double
+    public var minY: Double
+    public var maxX: Double
+    public var maxY: Double
+
+    public var width: Double { maxX - minX }
+    public var height: Double { maxY - minY }
+}
+
 /// A vector glyph outline decomposed into path elements.
 public struct GlyphOutline: Hashable, Sendable {
     public var elements: [OutlineElement]
+    /// The tight box around the filled shape (`FT_Outline_Get_BBox`). It accounts for the
+    /// extrema of curves, so it matches the glyph's ink.
+    public var boundingBox: BoundingBox
+    /// The box around all points, including off-curve control points (`FT_Outline_Get_CBox`).
+    /// Cheaper than ``boundingBox``, and always contains it.
+    public var controlBox: BoundingBox
 }
 
 /// Collects the callbacks of `FT_Outline_Decompose`.
@@ -105,7 +122,20 @@ final class OutlineBuilder {
             try ftTry(FT_Outline_Decompose(&outline, &funcs, Unmanaged.passUnretained(builder).toOpaque()))
         }
         builder.closeContour()
-        return GlyphOutline(elements: builder.elements)
+
+        var tight = FT_BBox()
+        var control = FT_BBox()
+        try ftTry(FT_Outline_Get_BBox(&outline, &tight))
+        FT_Outline_Get_CBox(&outline, &control)
+        func box(_ box: FT_BBox) -> BoundingBox {
+            BoundingBox(
+                minX: Double(box.xMin) / divisor,
+                minY: Double(box.yMin) / divisor,
+                maxX: Double(box.xMax) / divisor,
+                maxY: Double(box.yMax) / divisor
+            )
+        }
+        return GlyphOutline(elements: builder.elements, boundingBox: box(tight), controlBox: box(control))
     }
 }
 
