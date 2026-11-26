@@ -45,6 +45,10 @@ face.charMaps                         // [CharMap], with encodings and platform 
 try face.selectCharMap(.unicode)
 face.mappedCharacters()               // every (code, glyph) pair the selected map covers
 
+// Glyph names
+face.glyphName(for: face.glyphIndex(for: "A"))   // "A"
+face.glyphIndex(named: "space")
+
 // Outline bounds (tight box, and the cheaper control-point box)
 try face.glyph(for: "O", flags: .noHinting).outline?.boundingBox
 
