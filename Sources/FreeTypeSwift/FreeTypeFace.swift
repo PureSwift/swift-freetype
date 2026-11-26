@@ -44,7 +44,8 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     }
 
     public let library: FreeTypeLibrary
-    private let face: FT_Face
+    /// Internal so the extensions in other files can reach it; callers must hold the library lock.
+    let face: FT_Face
     /// Backing store for memory faces, destroyed after `deinit` (i.e. after `FT_Done_Face`).
     private let fontBytes: OwnedBuffer?
 
@@ -260,21 +261,17 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     /// The design axes of a variable font, or an empty array for other fonts.
     public var variationAxes: [VariationAxis] {
         library.withLock {
-            var variations: UnsafeMutablePointer<FT_MM_Var>?
-            guard FT_Get_MM_Var(face, &variations) == 0, let variations else { return [] }
-            defer { FT_Done_MM_Var(library.handle, variations) }
-
-            return (0..<Int(variations.pointee.num_axis)).map { index in
-                let axis = variations.pointee.axis[index]
-                return VariationAxis(
-                    tag: VariationAxis.string(fromTag: UInt32(truncatingIfNeeded: axis.tag)),
-                    name: axis.name.map { String(cString: $0) } ?? "",
-                    minimum: Double(axis.minimum) / 65536,
-                    defaultValue: Double(axis.def) / 65536,
-                    maximum: Double(axis.maximum) / 65536
-                )
-            }
+            withMMVar { VariationAxis.axes(in: $0) } ?? []
         }
+    }
+
+    /// Calls `body` with the face's `FT_MM_Var`, freeing it afterwards, or returns `nil` if the
+    /// face has none. The caller must hold the library lock.
+    func withMMVar<T>(_ body: (UnsafeMutablePointer<FT_MM_Var>) -> T) -> T? {
+        var variations: UnsafeMutablePointer<FT_MM_Var>?
+        guard FT_Get_MM_Var(face, &variations) == 0, let variations else { return nil }
+        defer { FT_Done_MM_Var(library.handle, variations) }
+        return body(variations)
     }
 
     /// Sets variable font axes by tag (e.g. `["wght": 700]`). Axes not mentioned keep their
@@ -315,6 +312,20 @@ public struct VariationAxis: Hashable, Sendable {
     public var minimum: Double
     public var defaultValue: Double
     public var maximum: Double
+
+    /// Reads the axes out of an `FT_MM_Var`.
+    static func axes(in variations: UnsafeMutablePointer<FT_MM_Var>) -> [VariationAxis] {
+        (0..<Int(variations.pointee.num_axis)).map { index in
+            let axis = variations.pointee.axis[index]
+            return VariationAxis(
+                tag: string(fromTag: UInt32(truncatingIfNeeded: axis.tag)),
+                name: axis.name.map { String(cString: $0) } ?? "",
+                minimum: Double(axis.minimum) / 65536,
+                defaultValue: Double(axis.def) / 65536,
+                maximum: Double(axis.maximum) / 65536
+            )
+        }
+    }
 
     static func string(fromTag tag: UInt32) -> String {
         let bytes = [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: tag >> $0) }
