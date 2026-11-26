@@ -558,3 +558,48 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         }
     }
 }
+
+@Suite struct GlyphNameTests {
+    @Test func namesKnownGlyphs() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let hasNames = face.hasGlyphNames
+        let a = face.glyphName(for: face.glyphIndex(for: "A"))
+        let space = face.glyphName(for: face.glyphIndex(for: " "))
+        #expect(hasNames)
+        #expect(a == "A")
+        #expect(space == "space")
+    }
+
+    @Test func lookupByNameMatchesCharMap() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let byName = face.glyphIndex(named: "A")
+        let byScalar = face.glyphIndex(for: "A")
+        #expect(byName != 0)
+        #expect(byName == byScalar)
+    }
+
+    @Test func unknownNameAndIndexAreMissing() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let missingIndex = face.glyphIndex(named: "definitely-not-a-glyph")
+        let emptyIndex = face.glyphIndex(named: "")
+        let outOfRange = face.glyphName(for: 0xFFFF_FFF0)
+        #expect(missingIndex == 0)
+        #expect(emptyIndex == 0)
+        #expect(outOfRange == nil)
+    }
+
+    @Test func namesRoundTrip() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let count = min(face.glyphCount, 300)
+        var named = 0
+        for index in 0..<count {
+            guard let name = face.glyphName(for: UInt32(index)) else { continue }
+            named += 1
+            // Looking a name up returns a glyph that carries that same name.
+            let found = face.glyphIndex(named: name)
+            #expect(found != 0 || index == 0)
+            #expect(face.glyphName(for: found) == name)
+        }
+        #expect(named > count / 2)
+    }
+}
