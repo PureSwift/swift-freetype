@@ -1,0 +1,138 @@
+import CFreeType
+#if canImport(CoreGraphics)
+import CoreGraphics
+#endif
+
+public struct OutlinePoint: Hashable, Sendable {
+    public var x: Double
+    public var y: Double
+}
+
+/// One segment of a vector outline. Coordinates are y-up.
+public enum OutlineElement: Hashable, Sendable {
+    case moveTo(OutlinePoint)
+    case lineTo(OutlinePoint)
+    case quadCurveTo(control: OutlinePoint, to: OutlinePoint)
+    case curveTo(control1: OutlinePoint, control2: OutlinePoint, to: OutlinePoint)
+    case close
+}
+
+/// A vector glyph outline decomposed into path elements.
+public struct GlyphOutline: Hashable, Sendable {
+    public var elements: [OutlineElement]
+}
+
+/// Collects the callbacks of `FT_Outline_Decompose`.
+///
+/// An unretained pointer to this object travels through the `user` parameter, so the
+/// `@convention(c)` callbacks capture nothing.
+final class OutlineBuilder {
+    private(set) var elements: [OutlineElement] = []
+    private var isOpen = false
+    private let divisor: Double
+
+    init(divisor: Double) {
+        self.divisor = divisor
+    }
+
+    private func point(_ vector: UnsafePointer<FT_Vector>) -> OutlinePoint {
+        OutlinePoint(x: Double(vector.pointee.x) / divisor, y: Double(vector.pointee.y) / divisor)
+    }
+
+    func moveTo(_ to: UnsafePointer<FT_Vector>) {
+        closeContour()
+        elements.append(.moveTo(point(to)))
+        isOpen = true
+    }
+
+    func lineTo(_ to: UnsafePointer<FT_Vector>) {
+        elements.append(.lineTo(point(to)))
+    }
+
+    func conicTo(_ control: UnsafePointer<FT_Vector>, _ to: UnsafePointer<FT_Vector>) {
+        elements.append(.quadCurveTo(control: point(control), to: point(to)))
+    }
+
+    func cubicTo(
+        _ control1: UnsafePointer<FT_Vector>,
+        _ control2: UnsafePointer<FT_Vector>,
+        _ to: UnsafePointer<FT_Vector>
+    ) {
+        elements.append(.curveTo(control1: point(control1), control2: point(control2), to: point(to)))
+    }
+
+    /// Decomposition doesn't emit an explicit close, so contours are closed here.
+    func closeContour() {
+        if isOpen {
+            elements.append(.close)
+            isOpen = false
+        }
+    }
+
+    /// Decomposes `outline`, throwing if FreeType reports an error.
+    static func decompose(
+        _ outline: inout FT_Outline,
+        divisor: Double
+    ) throws -> GlyphOutline {
+        let builder = OutlineBuilder(divisor: divisor)
+        var funcs = FT_Outline_Funcs(
+            move_to: { to, user in
+                guard let to, let user else { return 1 }
+                Unmanaged<OutlineBuilder>.fromOpaque(user).takeUnretainedValue().moveTo(to)
+                return 0
+            },
+            line_to: { to, user in
+                guard let to, let user else { return 1 }
+                Unmanaged<OutlineBuilder>.fromOpaque(user).takeUnretainedValue().lineTo(to)
+                return 0
+            },
+            conic_to: { control, to, user in
+                guard let control, let to, let user else { return 1 }
+                Unmanaged<OutlineBuilder>.fromOpaque(user).takeUnretainedValue().conicTo(control, to)
+                return 0
+            },
+            cubic_to: { control1, control2, to, user in
+                guard let control1, let control2, let to, let user else { return 1 }
+                Unmanaged<OutlineBuilder>.fromOpaque(user).takeUnretainedValue()
+                    .cubicTo(control1, control2, to)
+                return 0
+            },
+            shift: 0,
+            delta: 0
+        )
+        // `builder` is kept alive by this scope for the duration of the call.
+        try withExtendedLifetime(builder) {
+            try ftTry(FT_Outline_Decompose(&outline, &funcs, Unmanaged.passUnretained(builder).toOpaque()))
+        }
+        builder.closeContour()
+        return GlyphOutline(elements: builder.elements)
+    }
+}
+
+#if canImport(CoreGraphics)
+extension GlyphOutline {
+    /// The outline as a `CGPath` (y-up, same units as the outline).
+    public var cgPath: CGPath {
+        let path = CGMutablePath()
+        for element in elements {
+            switch element {
+            case .moveTo(let p):
+                path.move(to: CGPoint(x: p.x, y: p.y))
+            case .lineTo(let p):
+                path.addLine(to: CGPoint(x: p.x, y: p.y))
+            case .quadCurveTo(let c, let p):
+                path.addQuadCurve(to: CGPoint(x: p.x, y: p.y), control: CGPoint(x: c.x, y: c.y))
+            case .curveTo(let c1, let c2, let p):
+                path.addCurve(
+                    to: CGPoint(x: p.x, y: p.y),
+                    control1: CGPoint(x: c1.x, y: c1.y),
+                    control2: CGPoint(x: c2.x, y: c2.y)
+                )
+            case .close:
+                path.closeSubpath()
+            }
+        }
+        return path
+    }
+}
+#endif
