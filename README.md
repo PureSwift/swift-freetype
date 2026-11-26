@@ -34,6 +34,28 @@ try face.selectBitmapStrike(at: 0)   // see face.bitmapStrikes
 let emoji = try face.glyph(for: "😀", flags: .color)   // bitmap.pixelMode == .bgra
 ```
 
+## Text measurement and fonts
+
+```swift
+// Advances without loading glyphs (unrounded, pixels at the current size)
+let widths = try face.advances(of: "Hello".unicodeScalars.map { face.glyphIndex(for: $0) })
+
+// Character maps
+face.charMaps                         // [CharMap], with encodings and platform IDs
+try face.selectCharMap(.unicode)
+face.mappedCharacters()               // every (code, glyph) pair the selected map covers
+
+// Outline bounds (tight box, and the cheaper control-point box)
+try face.glyph(for: "O", flags: .noHinting).outline?.boundingBox
+
+// Variable font named instances
+if let bold = face.namedInstances.first(where: { $0.name == "Bold" }) {
+    try face.selectNamedInstance(bold)
+}
+face.variationCoordinates             // ["wght": 700, ...]
+try face.resetVariation()
+```
+
 ## Errors
 
 FreeType failures are thrown as `FreeTypeError` and can be matched by code, like `POSIXError`:
