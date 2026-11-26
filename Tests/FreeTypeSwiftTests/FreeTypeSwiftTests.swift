@@ -2,6 +2,9 @@ import Foundation
 import Testing
 @testable import FreeTypeSwift
 
+// `FreeTypeFace` is noncopyable, and `#expect` can't take a noncopyable value, so tests
+// read values from the face into locals before asserting on them.
+
 private func fontURL() throws -> URL {
     try #require(Bundle.module.url(forResource: "Inter-Variable", withExtension: "ttf", subdirectory: "Resources"))
 }
@@ -19,14 +22,14 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     @Test func missingFileThrows() throws {
         let library = try FreeTypeLibrary()
         #expect(throws: FreeTypeError.self) {
-            try library.face(path: "/nonexistent/font.ttf")
+            _ = try library.face(path: "/nonexistent/font.ttf")
         }
     }
 
     @Test func invalidDataThrows() throws {
         let library = try FreeTypeLibrary()
         #expect(throws: FreeTypeError.self) {
-            try library.face(data: Data("not a font".utf8))
+            _ = try library.face(data: Data("not a font".utf8))
         }
         #expect(!FreeTypeError(code: 1).message.isEmpty)
     }
@@ -35,42 +38,56 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
 @Suite struct FaceTests {
     @Test func metadata() throws {
         let face = try makeFace(FreeTypeLibrary())
-        #expect(face.familyName.hasPrefix("Inter"))
-        #expect(!face.styleName.isEmpty)
-        #expect(face.unitsPerEM == 2048)
-        #expect(face.glyphCount > 100)
-        #expect(face.isScalable)
-        #expect(face.designAscender > 0)
-        #expect(face.designDescender < 0)
+        let family = face.familyName
+        let style = face.styleName
+        let unitsPerEM = face.unitsPerEM
+        let glyphCount = face.glyphCount
+        let isScalable = face.isScalable
+        let ascender = face.designAscender
+        let descender = face.designDescender
+        #expect(family.hasPrefix("Inter"))
+        #expect(!style.isEmpty)
+        #expect(unitsPerEM == 2048)
+        #expect(glyphCount > 100)
+        #expect(isScalable)
+        #expect(ascender > 0)
+        #expect(descender < 0)
     }
 
     @Test func scaledMetricsFollowSize() throws {
-        let face = try makeFace(FreeTypeLibrary())
-        #expect(face.ascender == 0)
+        var face = try makeFace(FreeTypeLibrary())
+        let unsized = face.ascender
+        #expect(unsized == 0)
         try face.setPixelSize(width: 0, height: 32)
         let at32 = face.ascender
+        let descender = face.descender
+        let lineHeight = face.lineHeight
         #expect(at32 > 0)
-        #expect(face.descender < 0)
-        #expect(face.lineHeight > at32)
+        #expect(descender < 0)
+        #expect(lineHeight > at32)
 
         // 16pt at 144 dpi is 32px.
-        let other = try makeFace(FreeTypeLibrary())
+        var other = try makeFace(FreeTypeLibrary())
         try other.setCharSize(pointSize: 16, horizontalDPI: 144, verticalDPI: 144)
-        #expect(abs(other.ascender - at32) < 1)
+        let otherAscender = other.ascender
+        #expect(abs(otherAscender - at32) < 1)
     }
 
     @Test func characterMap() throws {
         let face = try makeFace(FreeTypeLibrary())
         let a = face.glyphIndex(for: "A")
+        let b = face.glyphIndex(for: "B")
+        let missing = face.glyphIndex(for: "\u{10FFFF}")
         #expect(a != 0)
-        #expect(a != face.glyphIndex(for: "B"))
-        #expect(face.glyphIndex(for: "\u{10FFFF}") == 0)
+        #expect(a != b)
+        #expect(missing == 0)
     }
 
     @Test func loadsFromMemory() throws {
         let data = try Data(contentsOf: fontURL())
-        let face = try FreeTypeLibrary().face(data: data)
-        #expect(face.glyphCount > 100)
+        var face = try FreeTypeLibrary().face(data: data)
+        let glyphCount = face.glyphCount
+        #expect(glyphCount > 100)
         try face.setPixelSize(width: 0, height: 24)
         // Rendering reads font bytes owned by the face.
         let glyph = try face.glyph(for: "g", flags: .render)
@@ -78,13 +95,14 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     }
 
     @Test func faceOutlivesLibraryReference() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 16)
-        #expect(try face.glyph(for: "A").advanceX > 0)
+        let advance = try face.glyph(for: "A").advanceX
+        #expect(advance > 0)
     }
 
     @Test func kerningDoesNotThrow() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 32)
         let kern = try face.kerning(leftGlyph: face.glyphIndex(for: "A"), rightGlyph: face.glyphIndex(for: "V"))
         #expect(kern.isFinite)
@@ -93,7 +111,7 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
 
 @Suite struct GlyphTests {
     @Test func metricsScaleWithSize() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 20)
         let small = try face.glyph(for: "A", flags: .noHinting).metrics
         try face.setPixelSize(width: 0, height: 40)
@@ -111,7 +129,7 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     }
 
     @Test func rendersBitmapWithCoverage() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 48)
         let glyph = try face.glyph(for: "A", flags: .render)
         let bitmap = try #require(glyph.bitmap)
@@ -123,7 +141,7 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     }
 
     @Test func spaceHasNoCoverage() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 48)
         let glyph = try face.glyph(for: " ", flags: .render)
         #expect(glyph.bitmap?.hasCoverage != true)
@@ -131,26 +149,30 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     }
 
     @Test func renderModes() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 32)
 
-        let mono = try #require(face.glyph(for: "A", render: .mono).bitmap)
+        let monoGlyph = try face.glyph(for: "A", render: .mono)
+        let mono = try #require(monoGlyph.bitmap)
         #expect(mono.pixelMode == .mono)
         #expect(mono.bytesPerRow == (mono.width + 7) / 8)
         #expect(mono.hasCoverage)
 
-        let normal = try #require(face.glyph(for: "A", render: .normal).bitmap)
-        let lcd = try #require(face.glyph(for: "A", render: .lcd).bitmap)
+        let normalGlyph = try face.glyph(for: "A", render: .normal)
+        let lcdGlyph = try face.glyph(for: "A", render: .lcd)
+        let normal = try #require(normalGlyph.bitmap)
+        let lcd = try #require(lcdGlyph.bitmap)
         #expect(lcd.pixelMode == .lcd)
         #expect(lcd.width >= normal.width * 2)
 
-        let sdf = try #require(face.glyph(for: "A", render: .sdf).bitmap)
+        let sdfGlyph = try face.glyph(for: "A", render: .sdf)
+        let sdf = try #require(sdfGlyph.bitmap)
         #expect(sdf.pixelMode == .gray)
         #expect(sdf.hasCoverage)
     }
 
     @Test func glyphIsUnaffectedByLaterLoads() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 32)
         let first = try face.glyph(for: "A", flags: .render)
         let snapshot = first.bitmap
@@ -159,9 +181,10 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
     }
 
     @Test func outlineDecomposition() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 100)
-        let outline = try #require(face.glyph(for: "O", flags: .noHinting).outline)
+        let oGlyph = try face.glyph(for: "O", flags: .noHinting)
+        let outline = try #require(oGlyph.outline)
 
         // "O" has an outer and an inner contour.
         let moves = outline.elements.filter { if case .moveTo = $0 { true } else { false } }
@@ -172,12 +195,13 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
             || outline.elements.contains { if case .curveTo = $0 { true } else { false } })
 
         // A is straight-sided: lines only, one outer and one inner contour (the counter).
-        let a = try #require(face.glyph(for: "A", flags: .noHinting).outline)
+        let aGlyph = try face.glyph(for: "A", flags: .noHinting)
+        let a = try #require(aGlyph.outline)
         #expect(a.elements.contains { if case .lineTo = $0 { true } else { false } })
     }
 
     @Test func outlineIsRoughlyGlyphSized() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 100)
         let glyph = try face.glyph(for: "H", flags: .noHinting)
         let outline = try #require(glyph.outline)
@@ -190,9 +214,10 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
 
     #if canImport(CoreGraphics)
     @Test func cgPathIsNonEmpty() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 100)
-        let path = try #require(face.glyph(for: "A").outline).cgPath
+        let glyph = try face.glyph(for: "A")
+        let path = try #require(glyph.outline).cgPath
         #expect(!path.isEmpty)
         #expect(path.boundingBox.height > 50)
     }
@@ -201,27 +226,33 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
 
 @Suite struct VariationTests {
     @Test func listsAxes() throws {
-        let face = try makeFace(FreeTypeLibrary())
-        #expect(face.isVariable)
-        let weight = try #require(face.variationAxes.first { $0.tag == "wght" })
+        var face = try makeFace(FreeTypeLibrary())
+        let isVariable = face.isVariable
+        let axes = face.variationAxes
+        let weight = try #require(axes.first { $0.tag == "wght" })
+        #expect(isVariable)
         #expect(weight.minimum < weight.defaultValue)
         #expect(weight.defaultValue < weight.maximum)
-        #expect(!face.hasCustomVariation)
+
+        let customBefore = face.hasCustomVariation
         try face.setVariation(["wght": weight.maximum])
-        #expect(face.hasCustomVariation)
+        let customAfter = face.hasCustomVariation
+        #expect(!customBefore)
+        #expect(customAfter)
     }
 
     @Test func badFaceIndexThrows() throws {
         let library = try FreeTypeLibrary()
         #expect(throws: FreeTypeError.self) {
-            try library.face(path: fontURL().path, index: 99)
+            _ = try library.face(path: fontURL().path, index: 99)
         }
     }
 
     @Test func weightChangesAdvance() throws {
-        let face = try makeFace(FreeTypeLibrary())
+        var face = try makeFace(FreeTypeLibrary())
         try face.setPixelSize(width: 0, height: 64)
-        let weight = try #require(face.variationAxes.first { $0.tag == "wght" })
+        let axes = face.variationAxes
+        let weight = try #require(axes.first { $0.tag == "wght" })
 
         try face.setVariation(["wght": weight.minimum])
         let thin = try face.glyph(for: "m", flags: .noHinting).advanceX
