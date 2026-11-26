@@ -21,26 +21,26 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
             self.rawValue = rawValue
         }
 
-        public static let scalable = Flags(rawValue: 1 << 0)
-        public static let fixedSizes = Flags(rawValue: 1 << 1)
-        public static let fixedWidth = Flags(rawValue: 1 << 2)
-        public static let sfnt = Flags(rawValue: 1 << 3)
-        public static let horizontal = Flags(rawValue: 1 << 4)
-        public static let vertical = Flags(rawValue: 1 << 5)
-        public static let kerning = Flags(rawValue: 1 << 6)
+        public static var scalable: Flags { Flags(rawValue: 1 << 0) }
+        public static var fixedSizes: Flags { Flags(rawValue: 1 << 1) }
+        public static var fixedWidth: Flags { Flags(rawValue: 1 << 2) }
+        public static var sfnt: Flags { Flags(rawValue: 1 << 3) }
+        public static var horizontal: Flags { Flags(rawValue: 1 << 4) }
+        public static var vertical: Flags { Flags(rawValue: 1 << 5) }
+        public static var kerning: Flags { Flags(rawValue: 1 << 6) }
         /// Set for variable fonts (`FT_FACE_FLAG_MULTIPLE_MASTERS`).
-        public static let multipleMasters = Flags(rawValue: 1 << 8)
-        public static let glyphNames = Flags(rawValue: 1 << 9)
-        public static let externalStream = Flags(rawValue: 1 << 10)
-        public static let hinter = Flags(rawValue: 1 << 11)
-        public static let cidKeyed = Flags(rawValue: 1 << 12)
-        public static let tricky = Flags(rawValue: 1 << 13)
-        public static let color = Flags(rawValue: 1 << 14)
+        public static var multipleMasters: Flags { Flags(rawValue: 1 << 8) }
+        public static var glyphNames: Flags { Flags(rawValue: 1 << 9) }
+        public static var externalStream: Flags { Flags(rawValue: 1 << 10) }
+        public static var hinter: Flags { Flags(rawValue: 1 << 11) }
+        public static var cidKeyed: Flags { Flags(rawValue: 1 << 12) }
+        public static var tricky: Flags { Flags(rawValue: 1 << 13) }
+        public static var color: Flags { Flags(rawValue: 1 << 14) }
         /// Set once the variation coordinates differ from the defaults (`FT_FACE_FLAG_VARIATION`).
-        public static let variation = Flags(rawValue: 1 << 15)
-        public static let svg = Flags(rawValue: 1 << 16)
-        public static let sbix = Flags(rawValue: 1 << 17)
-        public static let sbixOverlay = Flags(rawValue: 1 << 18)
+        public static var variation: Flags { Flags(rawValue: 1 << 15) }
+        public static var svg: Flags { Flags(rawValue: 1 << 16) }
+        public static var sbix: Flags { Flags(rawValue: 1 << 17) }
+        public static var sbixOverlay: Flags { Flags(rawValue: 1 << 18) }
     }
 
     public let library: FreeTypeLibrary
