@@ -15,7 +15,7 @@ public final class FreeTypeLibrary: @unchecked Sendable {
         var library: FT_Library?
         try ftTry(FT_Init_FreeType(&library))
         guard let library else {
-            throw FreeTypeError.invalidHandle
+            throw FreeTypeError(.invalidHandle)
         }
         self.handle = library
     }
