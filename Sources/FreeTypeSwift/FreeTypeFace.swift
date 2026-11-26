@@ -49,10 +49,17 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     /// Backing store for memory faces, destroyed after `deinit` (i.e. after `FT_Done_Face`).
     private let fontBytes: OwnedBuffer?
 
-    public init(library: FreeTypeLibrary, path: String, index: Int = 0) throws {
+    /// Opens a face from a font file.
+    ///
+    /// - Parameters:
+    ///   - index: The face within a font collection (`.ttc`); `0` for single-face files.
+    ///   - namedInstance: The 1-based named instance of a variable font to start from, or `0` for
+    ///     the default design coordinates. See ``FreeTypeFace/namedInstances``.
+    public init(library: FreeTypeLibrary, path: String, index: Int = 0, namedInstance: Int = 0) throws {
+        let packedIndex = try Self.packedFaceIndex(index: index, namedInstance: namedInstance)
         var face: FT_Face?
         try library.withLock {
-            try ftTry(FT_New_Face(library.handle, path, FT_Long(index), &face))
+            try ftTry(FT_New_Face(library.handle, path, packedIndex, &face))
         }
         guard let face else { throw FreeTypeError(.invalidHandle) }
         self.library = library
@@ -60,7 +67,10 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         self.fontBytes = nil
     }
 
-    public init(library: FreeTypeLibrary, data: Data, index: Int = 0) throws {
+    /// Opens a face from in-memory font data, which is copied and owned by the face. See
+    /// ``init(library:path:index:namedInstance:)`` for the index parameters.
+    public init(library: FreeTypeLibrary, data: Data, index: Int = 0, namedInstance: Int = 0) throws {
+        let packedIndex = try Self.packedFaceIndex(index: index, namedInstance: namedInstance)
         let bytes = OwnedBuffer(copying: data)
         var face: FT_Face?
         try library.withLock {
@@ -68,7 +78,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
                 library.handle,
                 bytes.baseAddress,
                 FT_Long(bytes.count),
-                FT_Long(index),
+                packedIndex,
                 &face
             ))
         }
@@ -85,6 +95,16 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         }
     }
 
+    /// Packs the face and named instance into FreeType's `face_index`: bits 0-15 select the face
+    /// in a collection and bits 16-30 the named instance. Out-of-range values throw rather than
+    /// bleeding into the other field (a negative index asks FreeType to skip loading).
+    static func packedFaceIndex(index: Int, namedInstance: Int) throws -> FT_Long {
+        guard (0...0xFFFF).contains(index), (0...0x7FFF).contains(namedInstance) else {
+            throw FreeTypeError(.invalidArgument)
+        }
+        return FT_Long(namedInstance) << 16 | FT_Long(index)
+    }
+
     // MARK: - Metadata
 
     public var flags: Flags { Flags(rawValue: Int(face.pointee.face_flags)) }
@@ -97,7 +117,14 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         face.pointee.style_name.map { String(cString: $0) } ?? ""
     }
 
+    /// The number of faces in the font file: more than 1 for collections (`.ttc`).
     public var faceCount: Int { Int(face.pointee.num_faces) }
+    /// This face's position within the font file.
+    public var faceIndex: Int { Int(face.pointee.face_index & 0xFFFF) }
+    /// The 1-based named instance this face was opened with or last switched to with
+    /// ``selectNamedInstance(_:)``, or `0` when none. Changing axes with ``setVariation(_:)`` does
+    /// not change it.
+    public var namedInstanceIndex: Int { Int((face.pointee.face_index >> 16) & 0x7FFF) }
     public var glyphCount: Int { Int(face.pointee.num_glyphs) }
     public var unitsPerEM: UInt16 { face.pointee.units_per_EM }
 
