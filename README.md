@@ -29,8 +29,9 @@ Metrics and outline coordinates are in pixels, or font units when `.noScale` is 
 
 ## Notes
 
-- Every FreeType call is serialized through the owning library's lock, so a library and its faces can be shared across threads.
-- In-memory fonts are copied and owned by the face, since FreeType reads from the buffer until the face is released.
+- `FreeTypeFace` is a noncopyable (`~Copyable`) struct: it has a single owner, `FT_Done_Face` runs once, and methods that change size or variation state are `mutating`. To share a face across threads, protect it with a lock.
+- Every FreeType call is serialized through the owning library's lock, so one library can safely back faces used on different threads. `FreeTypeLibrary` is a shared, reference-counted class.
+- In-memory fonts are copied into a noncopyable `OwnedBuffer` stored in the face, which guarantees the bytes outlive `FT_Done_Face`.
 - FreeType only reads the legacy `kern` table. For GPOS kerning, ligatures, or complex scripts, use a shaper such as HarfBuzz.
 - Tests bundle Inter (SIL OFL 1.1; see `Tests/FreeTypeSwiftTests/Resources/Inter-OFL.txt`).
 - Run `swift test --sanitize=address` to check for memory errors.
