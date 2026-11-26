@@ -603,3 +603,69 @@ private func makeFace(_ library: FreeTypeLibrary) throws -> FreeTypeFace {
         #expect(named > count / 2)
     }
 }
+
+@Suite struct SfntNameTests {
+    @Test func readsCommonNames() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let family = face.sfntName(.family)
+        let subfamily = face.sfntName(.subfamily)
+        let full = face.sfntName(.fullName)
+        let postScript = face.sfntName(.postScriptName)
+        let license = face.sfntName(.license)
+        let licenseURL = face.sfntName(.licenseURL)
+        let copyright = face.sfntName(.copyright)
+        #expect(family == "Inter")
+        #expect(subfamily == "Regular")
+        #expect(full == "Inter Regular")
+        #expect(postScript == "Inter-Regular")
+        #expect(license?.contains("SIL Open Font License") == true)
+        #expect(licenseURL == "https://openfontlicense.org")
+        #expect(copyright?.contains("The Inter Project Authors") == true)
+    }
+
+    @Test func missingNameIsNil() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let unused = face.sfntName(SfntName.ID(rawValue: 0x7FFF))
+        #expect(unused == nil)
+    }
+
+    @Test func recordsExposePlatformAndLanguage() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let records = face.sfntNames
+        let family = try #require(records.first { $0.id == .family && $0.platformID == 3 && $0.languageID == 0x409 })
+        #expect(records.count > 10)
+        #expect(family.string == "Inter")
+        #expect(family.isEnglish)
+        #expect(records.allSatisfy { !$0.string.isEmpty })
+    }
+
+    @Test func preferredNameMatchesAnEnglishWindowsRecord() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let records = face.sfntNames
+        let preferred = face.sfntName(.fullName)
+        let windowsEnglish = records.first { $0.id == .fullName && $0.platformID == 3 && $0.languageID == 0x409 }
+        #expect(preferred == windowsEnglish?.string)
+    }
+
+    @Test func postScriptNameUsesFreeTypeAccessor() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let optionalName = face.postScriptName
+        let name = try #require(optionalName)
+        #expect(name.hasPrefix("Inter"))
+    }
+
+    @Test func namedInstanceNamesStillResolve() throws {
+        let face = try makeFace(FreeTypeLibrary())
+        let instances = face.namedInstances
+        #expect(instances.contains { $0.name == "Bold" })
+        #expect(instances.allSatisfy { !$0.name.hasPrefix("Instance ") })
+    }
+
+    @Test func emojiFontNamesAreAvailable() throws {
+        let path = "/System/Library/Fonts/Apple Color Emoji.ttc"
+        guard FileManager.default.fileExists(atPath: path) else { return }
+        let face = try FreeTypeLibrary().face(path: path)
+        let family = face.sfntName(.family)
+        #expect(family?.contains("Emoji") == true)
+    }
+}
