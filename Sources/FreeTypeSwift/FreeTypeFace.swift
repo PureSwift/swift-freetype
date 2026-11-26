@@ -53,7 +53,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         try library.withLock {
             try ftTry(FT_New_Face(library.handle, path, FT_Long(index), &face))
         }
-        guard let face else { throw FreeTypeError(code: 1) }
+        guard let face else { throw FreeTypeError.invalidHandle }
         self.library = library
         self.face = face
         self.fontBytes = nil
@@ -72,7 +72,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
             ))
         }
         // On any failure, `bytes` is released here automatically.
-        guard let face else { throw FreeTypeError(code: 1) }
+        guard let face else { throw FreeTypeError.invalidHandle }
         self.library = library
         self.face = face
         self.fontBytes = consume bytes
@@ -180,7 +180,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
         return try library.withLock {
             try ftTry(FT_Load_Glyph(face, index, loadFlags.rawValue))
             guard let slot = face.pointee.glyph else {
-                throw FreeTypeError(code: 1)
+                throw FreeTypeError.invalidHandle
             }
 
             var outline: GlyphOutline?
@@ -257,7 +257,7 @@ public struct FreeTypeFace: ~Copyable, @unchecked Sendable {
     public mutating func setVariation(_ values: [String: Double]) throws {
         let axes = variationAxes
         guard !axes.isEmpty else {
-            throw FreeTypeError(code: 6) // Invalid_Argument
+            throw FreeTypeError.invalidArgument
         }
         try library.withLock {
             var coordinates = [FT_Fixed](repeating: 0, count: axes.count)
